@@ -65,11 +65,7 @@ void box_filter(cv::Mat& src, cv::Mat& dst, int kernel_size) {
     }
 }
 
-void compare(cv::Mat& img1, cv::Mat& img2, cv::Mat& result, double& interest) {
-    result = img1.clone();
-
-    double count = 0;
-
+/*
     for (int col = 0; col < img1.cols; col++) {
         for (int row = 0; row < img1.rows; row++) {
             if (img1.at<uchar>(row, col) == img2.at<uchar>(row, col) ||
@@ -82,20 +78,53 @@ void compare(cv::Mat& img1, cv::Mat& img2, cv::Mat& result, double& interest) {
         }
     }
     interest = count / (img1.rows * img1.cols);
-    return;
+    */
+
+void compare(cv::Mat& img1, cv::Mat& img2, cv::Mat& result) {
+    result = img1.clone();
+
+    double interest = 0;
+
+    for (int col = 0; col < img1.cols; col++) {
+        for (int row = 0; row < img1.rows; row++) {
+            uint8_t local_diff = std::abs(img1.at< uint8_t >(row, col) - img2.at< uint8_t >(row, col));
+
+			interest += (float)(local_diff) / 255;
+
+			result.at< uint8_t >(row, col) = local_diff;
+		}
+	}
+	
+	std::cout << "Match: " << std::round((1 - interest / (result.rows * result.cols)) * 100) << std::endl;    
 }
 
 
-void unsharpMasking(cv::Mat& src, cv::Mat& sharping, cv::Mat& dst, double k = 0.5) {
+void unsharpMasking(cv::Mat& src, cv::Mat& filter, cv::Mat& dst, double k = 0.2) {
     dst = src.clone();
+
     for (int col = 0; col < src.cols; col++)
         for (int row = 0; row < src.rows; row++) {
-            dst.at<uchar>(row, col) = src.at<uchar>(row, col) + k * (src.at<uchar>(row, col) - sharping.at<uchar>(row, col));
+            dst.at<uchar>(row, col) = src.at<uchar>(row, col) + k * (src.at<uchar>(row, col) - filter.at<uchar>(row, col));
         }
 }
 
 void laplasFiltration(cv::Mat& src, cv::Mat& dst) {
     dst = src.clone();
+    double k = 0.2;
+
+    for (unsigned int row = 1; row < src.rows - 1; row++){
+		for (unsigned int col = 1; col < src.cols - 1; col++) {
+			dst.at< uint8_t >(row, col) = src.at< uint8_t >(row, col) - (uint8_t)(k * (
+				src.at< uint8_t >(row + 1, col) + 
+                src.at< uint8_t >(row - 1, col) + 
+				src.at< uint8_t >(row, col + 1) + 
+                src.at< uint8_t >(row, col - 1) - 
+                4 * src.at< uint8_t >(row, col)
+            ));
+		}
+	}
+
+    /*
     for (int col = 1; col < src.cols - 1; col++)
         for(int row = 1; row < src.rows - 1; row++) {
             dst.at<uchar>(row, col) = std::round((src.at<uchar>(row, col) * (4) + 
@@ -104,28 +133,27 @@ void laplasFiltration(cv::Mat& src, cv::Mat& dst) {
             (-1) * src.at<uchar>(row, col + 1) + 
             (-1) * src.at<uchar>(row, col - 1)) / 9); 
         }
+    */
 }
 
-void logTransform(cv::Mat& img1, cv::Mat& img2, cv::Mat& result, double c = 0.5) {
+void logTransform(cv::Mat& img1, cv::Mat& result, double c = 70) {
     result = img1.clone();
-    for (int col = 0; col < img1.cols; col++)
-        for (int row = 0; row < img2.rows; row++) {
-            result.at<uchar>(row, col) = c * std::log(1 + std::abs(img1.at<uchar>(row, col) - img2.at<uchar>(row, col)));
-    }
+    for (int index = 0; index < img1.cols * img1.rows; index++)
+        result.data[index] = std::round(c * std::log(1 + img1.data[index]));
 }
 
 int main(int argc, char** argv) {
     // set timer
     TickMeter timer;
 
-    cv::Mat img = cv::imread("/home/gerzeg/Polytech/TV/lb2/images/plank.jpg", cv::IMREAD_GRAYSCALE);
+    cv::Mat img = cv::imread("/home/gerzeg/Polytech/TV/lb2/images/captain.jpeg", cv::IMREAD_GRAYSCALE);
     if (img.empty()) {
         std::cout << "Could not read the image" << std::endl;
         return -1;
     }
 
-    int startX = 375;
-    int startY = 0;
+    int startX = 325;
+    int startY = 100;
     int width = 400;
     int height = 400;
     cv::Rect rp(startX, startY, width, height);
@@ -162,22 +190,21 @@ int main(int argc, char** argv) {
 
     //compare images 1 own box filter and opencv box filter
     cv::Mat comparsion_1;
-    double interest;
-    compare(box_filtered, opencvFiltered, comparsion_1, interest);
-    std::cout << interest <<"" << std::endl;
+    compare(box_filtered, opencvFiltered, comparsion_1);
     cv::imshow("comparison BOX 1", comparsion_1);
     cv::waitKey(-1);
 
     //compare images 2 opencv box filter and gauss filter
     cv::Mat comparsion_2;
-    logTransform(GaussFiltered, opencvFiltered, comparsion_2);
+    compare(GaussFiltered, box_filtered, comparsion_2);
     cv::imshow("comparison BOX 2", comparsion_2);
     cv::waitKey(-1);
 
     //unsharp masking
     cv::Mat boxSharp;
-    cv::Mat gaussSharp;
+    cv::Mat gaussSharp; 
     unsharpMasking(roi, opencvFiltered, boxSharp);
+    //logTransform(GaussFiltered, GaussFiltered);
     unsharpMasking(roi, GaussFiltered, gaussSharp);
     cv::imshow("box sharping", boxSharp);
     cv::imshow("gauss sharping", gaussSharp);
@@ -185,7 +212,7 @@ int main(int argc, char** argv) {
 
     // comparsion log between box and gauss
     cv::Mat comparsion_3;
-    logTransform(boxSharp, gaussSharp, comparsion_3);
+    compare(boxSharp, gaussSharp, comparsion_3);
     cv::imshow("comparison BOX 3", comparsion_3);
     cv::waitKey(-1);
 
@@ -203,7 +230,7 @@ int main(int argc, char** argv) {
 
     // comparsion log between unsharp laplas and box
     cv::Mat comparsion_4;
-    logTransform(boxSharp, laplasSharp, comparsion_4);
+    compare(boxSharp, laplasSharp, comparsion_4);
     cv::imshow("comparison BOX 4", comparsion_4);
     cv::waitKey(-1);
     return 0;
